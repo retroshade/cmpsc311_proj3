@@ -12,6 +12,8 @@
 
 /* Header includes */
 #include <stdlib.h>
+#include <pthread.h>
+#include <stdio.h>
 
 #include "mapreduce.h"
 
@@ -24,13 +26,34 @@
 struct map_reduce *
 mr_create(map_fn map, reduce_fn reduce, int threads)
 {
-	return NULL;
+	int i;//, success;
+	const int nThreads = threads;
+	pthread_t child_threads[nThreads] = NULL;
+
+	struct map_reduce * mp = (struct map_reduce *)malloc(sizeof(struct map_reduce));	//allocates the memory for map reduce pointer
+	
+	if (mp != NULL) {	//if memory is allocated correctly
+		int i;
+		for (i = 0; i < threads; i++) {		//loop through the number of threads requested
+			if (pthread_create(&child_threads[i], NULL, int mr_start(mr, NULL, NULL), NULL) != 0) {		//create a thread that starts
+				printf("Error creating thread %d", i);
+				return NULL;			
+			}
+			
+		}
+
+		return mp;	//return the pointer
+	}
+	else {			//otherwise, if the memory allocation fails
+		return NULL;	//return NULL
+	}
 }
 
 /* Destroys and cleans up an existing instance of the MapReduce framework */
 void
 mr_destroy(struct map_reduce *mr)
 {
+	free(mr);	//releases the memory
 }
 
 /* Begins a multithreaded MapReduce operation */
