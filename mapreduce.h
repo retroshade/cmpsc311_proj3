@@ -62,6 +62,10 @@ typedef int (*reduce_fn)(struct map_reduce *mr, int outfd, int nmaps);
  */
 struct map_reduce {
 	/* add your fields here */
+  int nthreads;
+  pthread_t *child_threads;
+  int mapper_id;
+  
 };
 
 /**
@@ -172,4 +176,4 @@ int mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv);
  */
 int mr_consume(struct map_reduce *mr, int id, struct kvpair *kv);
 
-#endif
+#endif           		  	
