@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <signal.h>
 
 #include "mapreduce.h"
 
@@ -21,45 +22,87 @@
 /* Size of shared memory buffers */
 #define MR_BUFFER_SIZE 1024
 
+struct arguments {
+  struct map_reduce *mr;
+  const char *inpath;
+};
+
+static void *mr_child_func(void *arg);
+
+static void *mr_child_func(void *arg)
+{
+  printf("child function\n");
+  // make shared memory buffers
+  struct arguments *argument;
+  argument = (struct arguments*)arg;
+
+  struct map_reduce *mr;
+  mr = argument->mr;
+  int j;
+  if(j = map_fn(mr, (argument->inpath), (mr->mapper_id), (mr->nthreads)))
+    printf("%d\n", j);
+  return 0;
+}
 
 /* Allocates and initializes an instance of the MapReduce framework */
 struct map_reduce *
 mr_create(map_fn map, reduce_fn reduce, int threads)
 {
-	int i;//, success;
-	const int nThreads = threads;
-	pthread_t child_threads[nThreads] = NULL;
 
-	struct map_reduce * mp = (struct map_reduce *)malloc(sizeof(struct map_reduce));	//allocates the memory for map reduce pointer
-	
-	if (mp != NULL) {	//if memory is allocated correctly
-		int i;
-		for (i = 0; i < threads; i++) {		//loop through the number of threads requested
-			if (pthread_create(&child_threads[i], NULL, int mr_start(mr, NULL, NULL), NULL) != 0) {		//create a thread that starts
-				printf("Error creating thread %d", i);
-				return NULL;			
-			}
-			
-		}
-
-		return mp;	//return the pointer
-	}
-	else {			//otherwise, if the memory allocation fails
-		return NULL;	//return NULL
-	}
+  // use malloc() to allocate memory for an instance of the struct map_reduce
+  // if mp is not empty, that means it worked correctly
+  struct  map_reduce * mp =  malloc(sizeof(struct map_reduce));
+  if (mp != NULL) {
+     mp->nthreads = threads;
+    return mp;
+  }
+  else
+    return NULL;
 }
 
 /* Destroys and cleans up an existing instance of the MapReduce framework */
 void
 mr_destroy(struct map_reduce *mr)
 {
-	free(mr);	//releases the memory
+  printf("destroy function\n");
+  // use free to deallocate memory for the map_reduce struct
+  free(mr);
+
 }
 
 /* Begins a multithreaded MapReduce operation */
 int
 mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
 {
+   printf("start function\n");
+  // open the files in here
+  if (fopen(inpath, "r"))
+    printf("Inpath open\n");
+  if(fopen(outpath, "w"))
+    printf("Outpath open\n");
+
+  pthread_t child_array[mr->nthreads];
+
+  // create the threads
+  int i, success;
+  for (i = 0; i < mr->nthreads; i++)
+    {
+      mr->mapper_id = i;
+      struct arguments * arg = (struct arguments *)malloc(sizeof(struct arguments));
+      arg->mr = mr;
+      arg->inpath = inpath;
+      
+      printf("new thread\n");
+      success = pthread_create(&child_array[i], NULL, mr_child_func, (void*) arg);
+      
+      printf("success: %d\n", success);
+      if(success != 0)
+	printf("Error creating thread\n");
+      
+    }
+  mr->child_threads = child_array;
+
+  pthread_exit(NULL);
 	return 0;
 }
 
