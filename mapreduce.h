@@ -64,7 +64,8 @@ struct map_reduce {
 	/* add your fields here */
   int nthreads;
   pthread_t *child_threads;
-  int mapper_id;
+  map_fn mf;
+  reduce_fn rf;
   
 };
 
