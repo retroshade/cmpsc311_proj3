@@ -43,8 +43,13 @@ static void * mr_child_func(void *arg)
   int j;
   map_fn map_func = argument->mr->mf;
   printf("Mapper id: %d\n", argument->mapper_id);
+  // int i;
+  // for (i = 0; i < argument->mr->nthreads; i++) {
+  // printf("thread %d id in child func: %d\n", i, (int)argument->mr->child_threads[i]);
+  // }
+
   j = map_func(argument->mr, 0, argument->mapper_id, argument->mr->nthreads);
-  printf("%d\n", j);
+  //printf("%d\n", j);
 
   //mr_finish(argument->mr);
 
@@ -59,9 +64,13 @@ static void * mr_reduce_child_func(void *arg) {
   struct arguments *argument;
   argument = (struct arguments*)arg;
   reduce_fn reduce_func = argument->mr->rf;
+  
+  printf("mapper id: %d\n", argument->mapper_id);
+  printf("thread id: %d\n", (int)argument->mr->child_threads[argument->mr->nthreads]);
+
   int j;
   j = reduce_func(argument->mr, 1, argument->mr->nthreads);
-  printf("%d\n", j);
+  printf("exiting reduce child function\n");
   return 0;
 }
 
@@ -105,47 +114,75 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
   if(fopen(outpath, "w"))
     printf("Outpath open\n");
 
-  pthread_t child_array[mr->nthreads];
+  // pthread_t child_array[mr->nthreads];
+  // pthread_t *child_array = NULL;
 
   // create the threads
   int i, success;
   for (i = 0; i < mr->nthreads; i++)
     {
-      // mr->mapper_id = i;
       struct arguments * arg = (struct arguments *)malloc(sizeof(struct arguments));
       arg->mr = mr;
       arg->mapper_id = i;
       // arg->inpath = inpath;
       
       printf("new thread\n");
-      success = pthread_create(&child_array[i], NULL, mr_child_func, (void*) arg);
-      
-      printf("success: %d\n", success);
-      if(success != 0)
+      // success = pthread_create(&child_array[i], NULL, mr_child_func, (void*) arg);
+      success = pthread_create(&arg->mr->child_threads[i], NULL, mr_child_func, (void*) arg);
+      // this line is broken vvvvvvvv
+      // mr->child_threads[i] = child_array[i];
+      printf("thread id: %d\n", (int)mr->child_threads[i]);
+      if(success != 0) {
 	printf("Error creating thread\n");
+	return 1;
+      }
+      // arg->mr = mr;
+      int h;
+      for (h = 0; h <= i; h++) {
+	printf("thread id for %d is %d\n", h, (int)arg->mr->child_threads[h]);
+      }
+
     }
 
   // create another thread for the reduce function
-  i++;
   struct arguments * arg = (struct arguments *) malloc(sizeof(struct arguments));
   arg->mr = mr;
   arg->mapper_id = i;
   printf("Creating thread for reduce function\n");
-  success = pthread_create(&child_array[i], NULL, mr_reduce_child_func, (void*) arg);
-  printf("success: %d\n", success);
-  if(success != 0)
+  success = pthread_create(&arg->mr->child_threads[i], NULL, mr_reduce_child_func, (void*) arg);
+  printf("thread id: %d\n", (int)arg->mr->child_threads[i]);
+  if(success != 0) {
     printf("Error creating thread\n");
-  mr->child_threads = child_array;
+    return 1;
+ }
+  // arg->mr->child_threads[i] = child_array[i];
 
-  //pthread_exit(NULL);
-	return 0;
+  int j;
+  for (j = 0; j <= mr->nthreads; j++) {
+    printf("thread %d id: %d\n", j, (int)mr->child_threads[j]);
+  }
+
+  return 0;
 }
 
 /* Blocks until the entire MapReduce operation is complete */
 int
 mr_finish(struct map_reduce *mr)
 {
-	return 0;
+  // returns 0 if every Map and Reduce function returned 0 and nonzero if any of the Map or reduce functions failed
+  int returnValue = 0;
+  int i;
+
+  for (i = 0; i <= mr->nthreads; i++) {
+    printf("thread %d id in finish: %d\n", i, (int)mr->child_threads[i]);
+  }
+
+  for (i = 0; i <= mr->nthreads; i++) {
+    printf("wait for %d\n", (int)mr->child_threads[i]);
+    returnValue += pthread_join(mr->child_threads[i], 0);
+    printf("%d finished\n", (int)mr->child_threads[i]);
+  }
+  return returnValue;
 }
 
 /* Called by the Map function each time it produces a key-value pair */
