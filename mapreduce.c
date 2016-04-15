@@ -66,7 +66,6 @@ static void * mr_reduce_child_func(void *arg) {
 
   int j;
   j = reduce_func(argument->mr, 1, argument->mr->nthreads);
-  printf("exiting reduce child function\n");
   return 0;
 }
 
@@ -79,13 +78,6 @@ mr_create(map_fn map, reduce_fn reduce, int threads)
   // if mp is not empty, that means it worked correctly
 
   struct map_reduce * mp;
-  // if ((mp = malloc(sizeof(struct map_reduce))) == NULL) {
-  // if ((mp = malloc(sizeof(struct map_reduce))) == NULL) {
-  // printf("failing in create for mp\n");
-  // mr_destroy(mp);
-  // mr_create(map, reduce, threads);
-  // return (NULL);
-  //}
 
   mp = malloc(sizeof(struct map_reduce));
 
@@ -94,12 +86,10 @@ mr_create(map_fn map, reduce_fn reduce, int threads)
      mp->mf = map;
      mp->rf = reduce;
      if ((mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1))) == NULL) {
-       printf("could not create child thread pointer\n");
        mr_destroy(mp);
        mr_create(map, reduce, threads);
      }
        //mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1));
-     printf("returning mp\n");
     return mp;
   }
   else
@@ -113,10 +103,8 @@ mr_destroy(struct map_reduce *mr)
   printf("destroy function\n");
   // use free to deallocate memory for the map_reduce struct
   if (mr->child_threads != NULL) {
-    printf("freeing child threads\n");
     free(mr->child_threads);
   }
-  printf("freeing mr");
   free(mr);
 
 }
@@ -126,23 +114,18 @@ int
 mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
 {
    printf("start function\n");
-  // open the files in here
+  // open the files here
    FILE *in, *out;
-   if ((in = fopen(inpath, "r")))
-    printf("Inpath open\n");
-   if((out = fopen(outpath, "w")))
-    printf("Outpath open\n");
+   in = fopen(inpath, "r");
+   out = fopen(outpath, "w");
 
-  printf("Value in start in mr nthreads : %d\n", mr->nthreads);
 
   // create the threads
   int i, success;
   for (i = 0; i < mr->nthreads; i++)
   {
-    printf("in for loop\n");
       struct arguments * arg;
       if ((arg = malloc(sizeof(struct arguments))) == NULL) {
-	printf("free arg\n");
 	free (arg);
 	fclose(in);
 	fclose(out);
@@ -153,11 +136,10 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
       }
 
       if (arg == NULL) {
-	printf("arg is null\n");
 	mr_start(mr, inpath, outpath);
+	free (arg);
       }
       
-      printf("moving on\n");
       arg->mr = malloc(sizeof(struct map_reduce));
       arg->mr->child_threads = malloc(sizeof(pthread_t) * (mr->nthreads + 1));
       if (mr != NULL) {
@@ -166,21 +148,13 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
       arg->mapper_id = i;
       // arg->inpath = inpath;
       
-      printf("new thread\n");
-      // success = pthread_create(&child_array[i], NULL, mr_child_func, (void*) arg);
       success = pthread_create(&arg->mr->child_threads[i], NULL, mr_child_func, (void*) arg);
-      // this line is broken vvvvvvvv
-      //mr->child_threads[i] = child_array[i];
       printf("thread id: %d\n", (int)mr->child_threads[i]);
       if(success != 0) {
 	printf("Error creating thread\n");
 	return 1;
       }
       arg->mr = mr;
-      //int h;
-      //for (h = 0; h <= i; h++) {
-      //printf("thread id for %d is %d\n", h, (int)arg->mr->child_threads[h]);
-      //}
 
     }
 
@@ -190,7 +164,6 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
   arg->mapper_id = i;
   printf("Creating thread for reduce function\n");
   success = pthread_create(&arg->mr->child_threads[i], NULL, mr_reduce_child_func, (void*) arg);
-  printf("thread id: %d\n", (int)arg->mr->child_threads[i]);
   if(success != 0) {
     printf("Error creating thread\n");
     return 1;
