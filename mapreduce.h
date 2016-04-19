@@ -66,7 +66,10 @@ struct map_reduce {
   pthread_t *child_threads;
   map_fn mf;
   reduce_fn rf;
-  
+  int fail;
+  int *infd;
+  int outfd;
+  struct kvpair *buffer;
 };
 
 /**
