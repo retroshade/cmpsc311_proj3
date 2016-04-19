@@ -15,9 +15,10 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <signal.h>
-
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "mapreduce.h"
-
+#include <unistd.h>
 
 /* Size of shared memory buffers */
 #define MR_BUFFER_SIZE 1024
@@ -37,8 +38,16 @@ static void * mr_child_func(void *arg)
   struct arguments *argument = (struct arguments*)arg;
   int j;
   map_fn map_func = argument->mr->mf;
+  printf("argument->mapperid: %d\n", argument->mapper_id);
+  printf("file desc: %d\n", argument->mr->infd[argument->mapper_id]);
 
-  j = map_func(argument->mr, 0, argument->mapper_id, argument->mr->nthreads);
+  j = map_func(argument->mr, argument->mr->infd[argument->mapper_id], argument->mapper_id, argument->mr->nthreads);
+
+  if (j != 0) {
+    printf("map function failure\n");
+    printf("j = %d\n", j);
+    argument->mr->fail = j;
+  }
   free(arg);
   return 0;
 }
@@ -53,7 +62,14 @@ static void * mr_reduce_child_func(void *arg) {
   reduce_fn reduce_func = argument->mr->rf;
 
   int j;
-  j = reduce_func(argument->mr, 0, argument->mr->nthreads);
+  j = reduce_func(argument->mr, argument->mr->outfd, argument->mr->nthreads);
+
+  if (j != 0) {
+    printf("reduce function failure\n");
+    // printf("j = %d\n", j);
+    argument->mr->fail = j;
+  }
+
   free(arg);
   return 0;
 }
@@ -72,8 +88,11 @@ mr_create(map_fn map, reduce_fn reduce, int threads)
      mp->nthreads = threads;
      mp->mf = map;
      mp->rf = reduce;
+     mp->fail = 0;
+     mp->infd = malloc(sizeof(int) * threads);
+     mp->buffer = malloc(MR_BUFFER_SIZE);
      if ((mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1))) == NULL) {
-       printf("could not create child thread pointer\n");
+       perror("could not create child thread pointer\n");
        mr_destroy(mp);
        mr_create(map, reduce, threads);
      }
@@ -89,9 +108,11 @@ mr_destroy(struct map_reduce *mr)
 {
   printf("destroy function\n");
   // use free to deallocate memory for the map_reduce struct
-   if (mr->child_threads != NULL) {
+  if (mr->child_threads != NULL) {
     free(mr->child_threads);
-     }
+  }
+  free(mr->buffer);
+  free(mr->infd);
   free(mr);
 
 }
@@ -102,9 +123,17 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
 {
    printf("start function\n");
   // open the files in here
-   FILE *in, *out;
-   in = fopen(inpath, "r");
-   out = fopen(outpath, "w");
+   FILE *out;
+   int h;
+   for (h = 0; h <= mr->nthreads; h++) {
+     if ((mr->infd[h] = open(inpath, O_RDONLY)) < 0) {
+       return 1;
+     }
+   }
+   if ((mr->outfd = open(outpath, O_WRONLY | O_TRUNC)) < 0) {
+     out = fopen(outpath, "w");
+     mr->outfd = fileno(out);
+   }
 
   // create the threads
   int i, success;
@@ -140,8 +169,11 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
     return 1;
  }
   mr->child_threads[i] = childthreads[i];
-      fclose(in);
-      fclose(out);
+  //  int t;
+  //for (t = 0; t <= mr->nthreads; t++) {
+  //  close(mr->infd[t]);
+  //}
+  //fclose(out);
   return 0;
 }
 
@@ -150,24 +182,48 @@ int
 mr_finish(struct map_reduce *mr)
 {
   // returns 0 if every Map and Reduce function returned 0 and nonzero if any of the Map or reduce functions failed
-  int returnValue = 0;
+
   int i;
   for (i = 0; i <= mr->nthreads; i++) {
-    returnValue += pthread_join(mr->child_threads[i], 0);
+    pthread_join(mr->child_threads[i], 0);
   }
-  return returnValue;
+  
+   int t;
+  for (t = 0; t <= mr->nthreads; t++) {
+      close(mr->infd[t]);
+  }
+  close(mr->outfd);
+
+  if (mr->fail != 0)
+    return 1;
+  return 0;
 }
 
 /* Called by the Map function each time it produces a key-value pair */
 int
 mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
 {
-	return 0;
+  //struct kvpair buf[MR_BUFFER_SIZE];
+  if (sizeof(mr->buffer) == MR_BUFFER_SIZE) {
+    return 0;
+  }
+  // called by a map thread each time it produces a kv pair to be consumed by the reducer thread
+  // returns 1 upon success (one key-value pair is successfully produced)
+  // returns -1 upon failure
+	return 1;
 }
 
 /* Called by the Reduce function to consume a key-value pair */
 int
 mr_consume(struct map_reduce *mr, int id, struct kvpair *kv)
 {
+  // returns 1 if one pair is successfully consumed
+  // returns 0 if the map thread returns
+  // returns -1 on error
+
+  if (kv == NULL) {
 	return 0;
+  }
+
+  return 1;
 }
