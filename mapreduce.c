@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include "mapreduce.h"
 #include <unistd.h>
+#include <string.h>
 
 /* Size of shared memory buffers */
 #define MR_BUFFER_SIZE 1024
@@ -91,11 +92,16 @@ mr_create(map_fn map, reduce_fn reduce, int threads)
      mp->fail = 0;
      mp->infd = malloc(sizeof(int) * threads);
      mp->buffer = malloc(MR_BUFFER_SIZE);
-     if ((mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1))) == NULL) {
-       perror("could not create child thread pointer\n");
-       mr_destroy(mp);
-       mr_create(map, reduce, threads);
-     }
+     // int m;
+     // for (m = 0; m < threads; m++) {
+       // *(mp->buffer + m) = malloc(sizeof(int));
+     // }
+     //if ((mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1))) == NULL) {
+     // perror("could not create child thread pointer\n");
+     // mr_destroy(mp);
+     // mr_create(map, reduce, threads);
+     // }
+     mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1));
     return mp;
   }
   else
@@ -111,6 +117,10 @@ mr_destroy(struct map_reduce *mr)
   if (mr->child_threads != NULL) {
     free(mr->child_threads);
   }
+  int m;
+  //  for (m = 0; m < mr->nthreads; m++) {
+  // free(mr->buffer[m]);
+  // }
   free(mr->buffer);
   free(mr->infd);
   free(mr);
@@ -169,11 +179,7 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
     return 1;
  }
   mr->child_threads[i] = childthreads[i];
-  //  int t;
-  //for (t = 0; t <= mr->nthreads; t++) {
-  //  close(mr->infd[t]);
-  //}
-  //fclose(out);
+
   return 0;
 }
 
@@ -203,27 +209,57 @@ mr_finish(struct map_reduce *mr)
 int
 mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
 {
+  printf("producer function\n");
   //struct kvpair buf[MR_BUFFER_SIZE];
-  if (sizeof(mr->buffer) == MR_BUFFER_SIZE) {
-    return 0;
-  }
+  // the buffer can hold 16 kv pairs (??)
+  //if (sizeof(mr->buffer) == MR_BUFFER_SIZE) {
+  //  return 0;
+  //}
+
+  pthread_mutex_lock(&mr->lock);
+  printf("producer lock\n");
+  //memcpy(&mr->buffer[id], kv, sizeof(struct kvpair));
+  memcpy(&*mr->buffer, kv->key, sizeof(kv->keysz));
+  //memcpy(&mr->buffer[id], kv->value, sizeof(kv->valuesz));
+  printf("kv is: ");
+  printf(kv->key);
+  printf("\n");
+  pthread_mutex_unlock(&mr->lock);
   // called by a map thread each time it produces a kv pair to be consumed by the reducer thread
   // returns 1 upon success (one key-value pair is successfully produced)
   // returns -1 upon failure
-	return 1;
+  return 1;
 }
 
 /* Called by the Reduce function to consume a key-value pair */
 int
 mr_consume(struct map_reduce *mr, int id, struct kvpair *kv)
 {
+  printf("consumer function\n");
   // returns 1 if one pair is successfully consumed
   // returns 0 if the map thread returns
   // returns -1 on error
 
-  if (kv == NULL) {
-	return 0;
+  if (mr->buffer == NULL) {
+    printf("buffer is null\n");
+    return 0;
   }
+
+  pthread_mutex_lock(&mr->lock);
+  printf("consumer lock\n");
+  //kv = &mr->buffer[0][id];
+  memcpy(kv->key, &*mr->buffer, sizeof(kv->keysz));
+  //memcpy(kv->value, &mr->buffer[id], sizeof(kv->valuesz));
+  //memclr()
+  //printf("received from buffer: ");
+  //printf(mr->buffer[0][id].key);
+  //printf("\n");
+  pthread_mutex_unlock(&mr->lock);
+
+  printf("kv value in consume: ");
+  printf(kv->key);
+  printf("\n");
+  
 
   return 1;
 }
