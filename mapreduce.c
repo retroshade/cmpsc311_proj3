@@ -90,17 +90,21 @@ mr_create(map_fn map, reduce_fn reduce, int threads)
      mp->mf = map;
      mp->rf = reduce;
      mp->fail = 0;
+     pthread_mutex_init(&mp->lock, NULL);
      mp->infd = malloc(sizeof(int) * threads);
      mp->buffer = malloc(MR_BUFFER_SIZE);
-     // int m;
-     // for (m = 0; m < threads; m++) {
-       // *(mp->buffer + m) = malloc(sizeof(int));
-     // }
-     //if ((mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1))) == NULL) {
-     // perror("could not create child thread pointer\n");
-     // mr_destroy(mp);
-     // mr_create(map, reduce, threads);
-     // }
+     //mp->ids = malloc(sizeof(int) * (threads + 1));
+     int m;
+     for (m = 0; m < threads; m++) {
+     	 *(mp->buffer + m) = malloc(sizeof(int));
+     }
+     mp->bufferValproduce = malloc(sizeof(int) * threads);
+     mp->bufferValconsume = malloc(sizeof(int) * threads);
+     int n;
+     for (n = 0; n < threads; n++) {
+   	mp->bufferValproduce[n] = 0;
+        mp->bufferValconsume[n] = 0;
+     }
      mp->child_threads = malloc (sizeof(pthread_t) * (threads + 1));
     return mp;
   }
@@ -118,11 +122,16 @@ mr_destroy(struct map_reduce *mr)
     free(mr->child_threads);
   }
   int m;
-  //  for (m = 0; m < mr->nthreads; m++) {
-  // free(mr->buffer[m]);
-  // }
+  for (m = 0; m < mr->nthreads; m++) {
+  	free(mr->buffer[m]);
+	//free(&mr->bufferValproduce[m]);
+	//free(&mr->bufferValconsume[m]);
+  }
   free(mr->buffer);
+  //free(mr->bufferValproduce);
+  //free(mr->bufferValconsume);
   free(mr->infd);
+  pthread_mutex_destroy(&mr->lock);
   free(mr);
 
 }
@@ -156,8 +165,12 @@ mr_start(struct map_reduce *mr, const char *inpath, const char *outpath)
       return 1;
     }
     arg->mr = mr;
-      arg->mapper_id = i;
- 
+    arg->mapper_id = i;
+    mr->id = arg->mapper_id;
+    
+
+     //mr->bufferValproduce[i] = 0;
+     //mr->bufferValconsume[i] = 0; 
       success = pthread_create(&childthreads[i], NULL, mr_child_func, (void*) arg);
       
       if(success != 0) {
@@ -210,21 +223,53 @@ int
 mr_produce(struct map_reduce *mr, int id, const struct kvpair *kv)
 {
   printf("producer function\n");
-  //struct kvpair buf[MR_BUFFER_SIZE];
-  // the buffer can hold 16 kv pairs (??)
-  //if (sizeof(mr->buffer) == MR_BUFFER_SIZE) {
-  //  return 0;
-  //}
 
   pthread_mutex_lock(&mr->lock);
   printf("producer lock\n");
-  //memcpy(&mr->buffer[id], kv, sizeof(struct kvpair));
-  memcpy(&*mr->buffer, kv->key, sizeof(kv->keysz));
-  //memcpy(&mr->buffer[id], kv->value, sizeof(kv->valuesz));
-  printf("kv is: ");
-  printf(kv->key);
-  printf("\n");
+  
+  printf("%d\n", mr->bufferValproduce[id]);
+
+  memcpy(&mr->buffer[id][mr->bufferValproduce[id]], &kv->keysz, sizeof(kv->keysz));
+  mr->bufferValproduce[id] += (int)sizeof(kv->keysz);
+  printf("%d\n", mr->bufferValproduce[id]);
+  if ((int)mr->bufferValproduce[id] >= 1024) {
+    mr->bufferValproduce[id] = 0;
+    memcpy(&mr->buffer[id][mr->bufferValproduce[id]], &kv->keysz, sizeof(kv->keysz));
+    mr->bufferValproduce[id] += (int)sizeof(kv->keysz);
+  }
+
+  memcpy(&mr->buffer[id][mr->bufferValproduce[id]], kv->key, kv->keysz);
+  printf("%s\n", &mr->buffer[id][mr->bufferValproduce[id]]);
+  mr->bufferValproduce[id] += (int)kv->keysz;
+  if ((int)mr->bufferValproduce[id] >= 1024) {
+    mr->bufferValproduce[id] = 0;
+    memcpy(&mr->buffer[id][mr->bufferValproduce[id]], kv->key, kv->keysz);
+    mr->bufferValproduce[id] += (int)(kv->keysz);
+  }
+  printf("%d\n", mr->bufferValproduce[id]);
+  printf("key is in\n");
+  
+  memcpy(&mr->buffer[id][mr->bufferValproduce[id]], &kv->valuesz, sizeof(kv->valuesz));
+  mr->bufferValproduce[id] += (int)sizeof(kv->valuesz);
+  if ((int)mr->bufferValproduce[id] >= 1024) {
+    mr->bufferValproduce[id] = 0;
+    memcpy(&mr->buffer[id][mr->bufferValproduce[id]], &kv->valuesz, sizeof(kv->valuesz));
+    mr->bufferValproduce[id] += (int)sizeof(kv->valuesz);
+  }
+  printf("%d\n", mr->bufferValproduce[id]);  
+
+  memcpy(&mr->buffer[id][mr->bufferValproduce[id]], kv->value, kv->valuesz);
+  mr->bufferValproduce[id] += (int)kv->valuesz;
+  if ((int)mr->bufferValproduce[id] >= 1024) {
+    mr->bufferValproduce[id] = 0;
+    memcpy(&mr->buffer[id][mr->bufferValproduce[id]], kv->value, kv->valuesz);
+    mr->bufferValproduce[id] += (int)kv->valuesz;
+  }
+  printf("val is in\n");
+  printf("%d\n", mr->bufferValproduce[id]);  
+
   pthread_mutex_unlock(&mr->lock);
+  
   // called by a map thread each time it produces a kv pair to be consumed by the reducer thread
   // returns 1 upon success (one key-value pair is successfully produced)
   // returns -1 upon failure
@@ -237,28 +282,51 @@ mr_consume(struct map_reduce *mr, int id, struct kvpair *kv)
 {
   printf("consumer function\n");
   // returns 1 if one pair is successfully consumed
-  // returns 0 if the map thread returns
+  // returns 0 if the map thread returns-- no more values left in that particular mapper
   // returns -1 on error
 
-  if (mr->buffer == NULL) {
-    printf("buffer is null\n");
-    return 0;
-  }
+  printf("%d\n", mr->bufferValconsume[id]);
 
   pthread_mutex_lock(&mr->lock);
   printf("consumer lock\n");
-  //kv = &mr->buffer[0][id];
-  memcpy(kv->key, &*mr->buffer, sizeof(kv->keysz));
-  //memcpy(kv->value, &mr->buffer[id], sizeof(kv->valuesz));
-  //memclr()
-  //printf("received from buffer: ");
-  //printf(mr->buffer[0][id].key);
-  //printf("\n");
+ 
+  memcpy(&kv->keysz, &mr->buffer[id][mr->bufferValconsume[id]], sizeof(kv->keysz));
+  mr->bufferValconsume[id] += (int)(sizeof(kv->keysz));
+  if ((int)mr->bufferValconsume[id] >= 1024) {
+    mr->bufferValconsume[id] = 0;
+    memcpy(&kv->keysz, &mr->buffer[id][mr->bufferValconsume[id]], sizeof(kv->keysz));
+    mr->bufferValconsume[id] += (int)(sizeof(kv->keysz));
+  }
+  printf("%d\n", mr->bufferValconsume[id]);
+
+  memcpy(kv->key, &mr->buffer[id][mr->bufferValconsume[id]], (int)kv->keysz);
+  mr->bufferValconsume[id] += (int)kv->keysz;
+  if ((int)mr->bufferValconsume[id] >= 1024) {
+    mr->bufferValconsume[id] = 0;
+    memcpy(kv->key, &mr->buffer[id][mr->bufferValconsume[id]], (int)kv->keysz);
+    mr->bufferValconsume[id] += (int)kv->keysz;
+  }
+  printf("%d\n", mr->bufferValconsume[id]);
+
+  memcpy(&kv->valuesz, &mr->buffer[id][mr->bufferValconsume[id]], sizeof(kv->valuesz));
+  mr->bufferValconsume[id] += (int)(sizeof(kv->valuesz));
+  if ((int)mr->bufferValconsume[id] >= 1024) {
+    mr->bufferValconsume[id] = 0;
+    memcpy(&kv->valuesz, &mr->buffer[id][mr->bufferValconsume[id]], sizeof(kv->valuesz));
+    mr->bufferValconsume[id] += (int)(sizeof(kv->valuesz));
+  }
+
+  memcpy(kv->value, &mr->buffer[id][mr->bufferValconsume[id]], kv->valuesz);
+  mr->bufferValconsume[id] += (int)kv->valuesz;
+  if ((int)mr->bufferValconsume[id] >= 1024) {
+    mr->bufferValconsume[id] = 0;
+    memcpy(kv->value, &mr->buffer[id][mr->bufferValconsume[id]], kv->valuesz);
+    mr->bufferValconsume[id] += (int)kv->valuesz;
+  }
+  printf("%d\n", mr->bufferValconsume[id]);
+
   pthread_mutex_unlock(&mr->lock);
 
-  printf("kv value in consume: ");
-  printf(kv->key);
-  printf("\n");
   
 
   return 1;
